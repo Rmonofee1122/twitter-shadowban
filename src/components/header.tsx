@@ -5,7 +5,7 @@ import { FaXTwitter } from "react-icons/fa6";
 export function Header() {
   return (
     <header>
-      <Navbar position="static" className="bg-neutral-0 dark:bg-neutral-800">
+      <Navbar position="static" className="dark:bg-neutral-800">
         <NavbarBrand>
           <FaXTwitter className="text-3xl" />
         </NavbarBrand>

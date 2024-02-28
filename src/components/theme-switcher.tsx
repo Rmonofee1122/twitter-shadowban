@@ -19,13 +19,13 @@ export function ThemeSwitcher() {
     case "dark":
       return (
         <Button isIconOnly color="primary" variant="solid" onClick={() => setTheme("light")}>
-          <FaSun />
+          <FaSun className="text-xl" />
         </Button>
       )
     case "light":
       return (
         <Button isIconOnly color="primary" variant="flat" onClick={() => setTheme("dark")}>
-          <FaMoon />
+          <FaMoon className="text-xl" />
         </Button>
       )
     default:
