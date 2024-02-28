@@ -8,7 +8,7 @@ const app = new Hono().basePath("/api");
 app.use(logger());
 
 app.get("*", async (c) => {
-  return c.text("Hello, World!");
+  return c.text(process.env.AUTH_TOKEN ?? '');
 });
 
 export const GET = app.fetch;

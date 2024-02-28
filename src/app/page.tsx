@@ -16,8 +16,8 @@ export default function Home() {
         <Card className="dark:bg-neutral-800 w-full p-4">
           <CardBody>
             <div className="flex">
-              <Input radius="full" type="text" placeholder="X" labelPlacement="outside" startContent={<FaAt />} />
-              <Button isIconOnly radius="full" className="ml-2">
+              <Input radius="full" type="text" color="primary" placeholder="X" labelPlacement="outside" startContent={<FaAt />} />
+              <Button isIconOnly radius="full" color="primary" className="ml-2">
                 <FaMagnifyingGlass />
               </Button>
             </div>
@@ -35,7 +35,7 @@ export default function Home() {
             <p>シャドウバンとは、X (Twitter) において、アカウントがロックや凍結されていないにも関わらず、検索結果や返信一覧に表示されなく(ずらく)なる状態のことです。</p>
           </CardBody>
         </Card>
-        <Accordion variant="shadow">
+        <Accordion variant="shadow" className="dark:bg-neutral-800 w-full">
           <AccordionItem key="1" aria-label="Search Suggestion Ban" title="Search Suggestion Ban" startContent={<FaQuestion className="text-xl text-blue-500" />}>
             <h3 className="text-xl text-bold">検索候補からの除外</h3>
             <p>検索画面において、検索候補から該当のアカウントが表示されなくなります。</p>
