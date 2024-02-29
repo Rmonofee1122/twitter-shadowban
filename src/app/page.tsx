@@ -28,7 +28,7 @@ export default function Home() {
   }
   return (
     <div className="flex flex-col items-center justify-center my-12">
-      <div className="flex flex-col items-center justify-center max-w-4xl px-4 gap-8">
+      <div className="flex flex-col items-center justify-center max-w-4xl w-full px-4 gap-8">
         <h1 className={`${montserrat.className} text-4xl`}>
           Is @{username ? username : 'Username'}<br />Shadowbanned on X (Twitter)?
         </h1>
