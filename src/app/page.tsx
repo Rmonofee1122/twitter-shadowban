@@ -14,26 +14,29 @@ const montserrat = Montserrat({ subsets: ["latin"] });
 export default function Home() {
   const [username, setUsername] = useState("");
   const [results, setResults] = useState<z.infer<typeof ResultsSchema>>();
+  const [loading, setLoading] = useState(false);
   const client = hc<AppType>('/api');
   const test = async (screenName: string) => {
+    setLoading(true);
     const results = await client.test.$get({
       query: {
         screen_name: screenName,
       },
     });
+    setLoading(false);
     setResults(await results.json());
   }
   return (
     <div className="flex flex-col items-center justify-center my-12">
       <div className="flex flex-col items-center justify-center max-w-4xl px-4 gap-8">
-        <h1 className={`${montserrat.className} text-4xl text-bold`}>
+        <h1 className={`${montserrat.className} text-4xl`}>
           Is @{username ? username : 'Username'}<br />Shadowbanned on X (Twitter)?
         </h1>
         <Card className="dark:bg-neutral-800 w-full p-4">
           <CardBody>
             <div className="flex">
-              <Input radius="full" type="text" color="primary" placeholder="X" labelPlacement="outside" startContent={<FaAt />} onChange={(e) => setUsername(e.target.value)} />
-              <Button isIconOnly radius="full" color="primary" className="ml-2" onClick={() => test(username)}>
+              <Input radius="full" type="text" placeholder="X" labelPlacement="outside" startContent={<FaAt />} onChange={(e) => setUsername(e.target.value)} />
+              <Button isIconOnly radius="full" color="primary" type="submit" isLoading={loading} className="ml-2" onClick={() => test(username)}>
                 <FaMagnifyingGlass />
               </Button>
             </div>
