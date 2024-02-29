@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Providers } from "@/components/providers";
 import { Header } from "@/components/header";
-import "./globals.css";
 import { Footer } from "@/components/footer";
+import { GoogleTagManager } from '@next/third-parties/google'
+import "./globals.css";
 
 const BASE_URL = "https://shadowban.lami.zip";
 
@@ -39,6 +40,7 @@ export default function RootLayout({
           </div>
         </Providers>
       </body>
+      <GoogleTagManager gtmId={process.env.GTM_ID ?? ''} />
     </html>
   );
 }
