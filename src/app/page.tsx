@@ -5,9 +5,11 @@ import { Montserrat } from "next/font/google";
 import { useState } from "react";
 import { FaAt, FaBan, FaCheck, FaMagnifyingGlass, FaQuestion } from "react-icons/fa6";
 import { hc } from "hono/client";
-import { ResultsSchema } from "./api/[[...slug]]/schemas";
+import { TestQuerySchema, ResultsSchema } from "./api/[[...slug]]/schemas";
 import { AppType } from "./api/[[...slug]]/route";
 import { z } from "@hono/zod-openapi";
+import { useForm, SubmitHandler } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 
 const montserrat = Montserrat({ subsets: ["latin"] });
 
@@ -58,16 +60,21 @@ const XGrayVerifiedIcon = ({ ...props }: React.SVGProps<SVGSVGElement>) => (
 )
 
 export default function Home() {
-  const [username, setUsername] = useState("");
   const [results, setResults] = useState<z.infer<typeof ResultsSchema>>();
   const [loading, setLoading] = useState(false);
   const client = hc<AppType>('/api');
-  const test = async (screenName: string) => {
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors, isDirty, isValid },
+  } = useForm<z.infer<typeof TestQuerySchema>>({
+    resolver: zodResolver(TestQuerySchema),
+  });
+  const onSubmit: SubmitHandler<z.infer<typeof TestQuerySchema>> = async (data) => {
     setLoading(true);
     const results = await client.test.$get({
-      query: {
-        screen_name: screenName,
-      },
+      query: data,
     });
     setLoading(false);
     setResults(await results.json());
@@ -76,16 +83,16 @@ export default function Home() {
     <div className="flex flex-col items-center justify-center my-12">
       <div className="flex flex-col items-center justify-center max-w-4xl w-full px-4 gap-8">
         <h1 className={`${montserrat.className} text-4xl`}>
-          Is @{username ? username : 'Username'}<br />Shadowbanned on X (Twitter)?
+          Is @{watch("screen_name") ? watch("screen_name") : 'Username'}<br />Shadowbanned on X (Twitter)?
         </h1>
         <Card className="dark:bg-neutral-800 w-full p-4">
           <CardBody>
-            <div className="flex">
-              <Input radius="full" type="text" placeholder="X" labelPlacement="outside" startContent={<FaAt />} onChange={(e) => setUsername(e.target.value)} />
-              <Button isIconOnly radius="full" color="primary" type="submit" isLoading={loading} className="ml-2" onClick={() => test(username)}>
+            <form className="flex" onSubmit={handleSubmit(onSubmit)}>
+              <Input radius="full" type="text" placeholder="X" variant="faded" labelPlacement="outside" startContent={<FaAt />} isInvalid={!!errors.screen_name} errorMessage={errors.screen_name?.message} {...register("screen_name")} />
+              <Button isIconOnly radius="full" color="primary" type="submit" isLoading={loading} isDisabled={!isDirty || !isValid} className="ml-2">
                 <FaMagnifyingGlass />
               </Button>
-            </div>
+            </form>
           </CardBody>
         </Card>
         <Divider />

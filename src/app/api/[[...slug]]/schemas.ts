@@ -1,7 +1,7 @@
 import { z } from "@hono/zod-openapi";
 
 export const TestQuerySchema = z.object({
-  screen_name: z.string().openapi({
+  screen_name: z.string().min(1, "1文字以上にしてください").max(15, "15文字以下にしてください").regex(/^[a-zA-Z0-9_]+$/, "正しい形式にしてください").openapi({
     example: "X",
     description: "ユーザー名",
   }),
