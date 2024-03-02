@@ -18,13 +18,13 @@ export function ThemeSwitcher() {
   switch (theme) {
     case "dark":
       return (
-        <Button isIconOnly color="primary" variant="solid" onClick={() => setTheme("light")}>
+        <Button isIconOnly color="primary" variant="solid" aria-label="Switch to light mode" onClick={() => setTheme("light")}>
           <FaSun className="text-xl" />
         </Button>
       )
     case "light":
       return (
-        <Button isIconOnly color="primary" variant="flat" onClick={() => setTheme("dark")}>
+        <Button isIconOnly color="primary" variant="flat" aria-label="Switch to dark mode" onClick={() => setTheme("dark")}>
           <FaMoon className="text-xl" />
         </Button>
       )

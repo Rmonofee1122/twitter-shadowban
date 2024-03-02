@@ -89,7 +89,7 @@ export default function Home() {
           <CardBody>
             <form className="flex" onSubmit={handleSubmit(onSubmit)}>
               <Input radius="full" type="text" placeholder="X" variant="faded" labelPlacement="outside" startContent={<FaAt />} isInvalid={!!errors.screen_name} errorMessage={errors.screen_name?.message} {...register("screen_name")} />
-              <Button isIconOnly radius="full" color="primary" type="submit" isLoading={loading} isDisabled={!isDirty || !isValid} className="ml-2">
+              <Button isIconOnly radius="full" color="primary" type="submit" aria-label="Test" isLoading={loading} isDisabled={!isDirty || !isValid} className="ml-2">
                 <FaMagnifyingGlass />
               </Button>
             </form>
