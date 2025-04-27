@@ -76,9 +76,7 @@ src/
   ├── app/              # Next.js App Routerのファイル
   │   ├── api/          # APIエンドポイント
   │   └── page.tsx      # メインページ
-  ├── components/       # 再利用可能なReactコンポーネント
-  └── lib/              # ユーティリティ関数やヘルパー
-      └── x-client-transaction/ # X API用のクライアントトランザクション機能
+  └── components/       # 再利用可能なReactコンポーネント
 ```
 
 ## 貢献方法

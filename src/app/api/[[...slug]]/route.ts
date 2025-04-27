@@ -8,8 +8,8 @@ import {
   XClientTransactionIdResponseSchema,
 } from "./schemas";
 import ky from "ky";
-import { ClientTransaction } from "@/lib/x-client-transaction";
-import { handleXMigration } from "@/lib/x-client-transaction/utils";
+import { ClientTransaction } from "@lami/x-client-transaction-id";
+import { handleXMigration } from "@lami/x-client-transaction-id";
 
 function generateRandomHexString(length: number) {
   let result = "";
