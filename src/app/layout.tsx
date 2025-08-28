@@ -28,7 +28,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="ja">
+    <html lang="ja" suppressHydrationWarning>
       <body>
         <Providers>
           <div className="flex flex-col h-screen">
@@ -39,8 +39,8 @@ export default function RootLayout({
             <Footer />
           </div>
         </Providers>
+        <GoogleTagManager gtmId={process.env.GTM_ID ?? ''} />
       </body>
-      <GoogleTagManager gtmId={process.env.GTM_ID ?? ''} />
     </html>
   );
 }

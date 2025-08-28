@@ -73,11 +73,17 @@ export default function Home() {
   });
   const onSubmit: SubmitHandler<z.infer<typeof TestQuerySchema>> = async (data) => {
     setLoading(true);
-    const results = await client.test.$get({
-      query: data,
-    });
+    try {
+      const results = await client.test.$get({
+        query: data,
+      });
+      const jsonData = await results.json();
+      setResults(jsonData);
+    } catch (error) {
+      console.error('Failed to fetch test results:', error);
+      setResults(undefined);
+    }
     setLoading(false);
-    setResults(await results.json());
   }
   return (
     <div className="flex flex-col items-center justify-center my-12">
