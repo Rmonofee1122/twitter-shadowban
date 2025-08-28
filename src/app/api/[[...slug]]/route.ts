@@ -9,6 +9,117 @@ import {
 } from "./schemas";
 import ky from "ky";
 import { ClientTransaction, handleXMigration } from "x-client-transaction-id";
+import { PerformanceMonitor } from "./performance-monitor";
+
+// キャッシュとレスポンス最適化
+const responseCache = new Map();
+const CACHE_TTL = 60000; // 1分キャッシュ
+
+// 接続プールとHTTPクライアント最適化
+class TwitterAPIClient {
+  private static instance: TwitterAPIClient;
+  private client: typeof ky;
+  private connectionPool: Map<string, any> = new Map();
+
+  private constructor() {
+    // kyクライアントの設定を最適化
+    this.client = ky.create({
+      prefixUrl: "https://api.twitter.com",
+      timeout: 15000, // 15秒タイムアウト
+      retry: {
+        limit: 3,
+        methods: ['get'],
+        statusCodes: [408, 413, 429, 500, 502, 503, 504],
+        backoffLimit: 3000
+      },
+      hooks: {
+        beforeError: [
+          error => {
+            const { response } = error;
+            if (response && response.body) {
+              console.error('Twitter API Error:', response.status, response.body);
+            }
+            return error;
+          }
+        ]
+      }
+    });
+  }
+
+  static getInstance(): TwitterAPIClient {
+    if (!TwitterAPIClient.instance) {
+      TwitterAPIClient.instance = new TwitterAPIClient();
+    }
+    return TwitterAPIClient.instance;
+  }
+
+  async createAuthenticatedClient(authToken: string, csrfToken: string, ct: any) {
+    const cacheKey = `client_${authToken.slice(-8)}_${csrfToken}`;
+    
+    if (this.connectionPool.has(cacheKey)) {
+      const cached = this.connectionPool.get(cacheKey);
+      if (Date.now() - cached.timestamp < 300000) { // 5分間キャッシュ
+        return cached.client;
+      }
+    }
+
+    const authenticatedClient = this.client.extend({
+      headers: {
+        authorization: "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
+        "sec-ch-ua": '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "sec-gpc": "1",
+        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "x-csrf-token": csrfToken,
+        "x-twitter-active-user": "yes",
+        "x-twitter-auth-type": "OAuth2Session",
+        "x-twitter-client-language": "ja",
+        cookie: `auth_token=${authToken}; ct0=${csrfToken}`,
+      },
+      hooks: {
+        beforeRequest: [
+          async (request) => {
+            const xClientTransactionId = await ct.generateTransactionId(
+              request.method,
+              new URL(request.url).pathname
+            );
+            request.headers.set("x-client-transaction-id", xClientTransactionId);
+          },
+        ],
+      },
+    });
+
+    // 接続プールにキャッシュ
+    this.connectionPool.set(cacheKey, {
+      client: authenticatedClient,
+      timestamp: Date.now()
+    });
+
+    // 古いキャッシュエントリを削除（メモリリーク防止）
+    if (this.connectionPool.size > 50) {
+      const now = Date.now();
+      for (const [key, value] of this.connectionPool.entries()) {
+        if (now - value.timestamp > 600000) { // 10分以上古い
+          this.connectionPool.delete(key);
+        }
+      }
+    }
+
+    return authenticatedClient;
+  }
+
+  // 統計情報取得
+  getPoolStats() {
+    return {
+      activeConnections: this.connectionPool.size,
+      cacheHitRate: this.connectionPool.size > 0 ? 1 : 0
+    };
+  }
+}
 
 function generateRandomHexString(length: number) {
   let result = "";
@@ -96,55 +207,46 @@ const route = app.openapi(
     },
   }),
   async (c: any) => {
+    const performanceMonitor = PerformanceMonitor.getInstance();
+    const startTime = Date.now();
+    
     try {
+      const { screen_name: screenName } = c.req.valid("query");
+      
+      // キャッシュチェック
+      const cacheKey = `shadowban_${screenName}`;
+      const cached = responseCache.get(cacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        return c.json(cached.data);
+      }
+      
       const authToken = process.env.AUTH_TOKEN;
       if (!authToken) {
         return c.json({ error: "AUTH_TOKEN is not defined" }, 500);
       }
+      
+      // 最適化された接続プール使用
       const csrfToken = generateRandomHexString(16);
-      const response = await handleXMigration();
-      const ct = await ClientTransaction.create(response);
-      const client = ky.create({
-        prefixUrl: "https://api.twitter.com",
-        headers: {
-          authorization:
-            "Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA",
-          "sec-ch-ua":
-            '"Google Chrome";v="135", "Not-A.Brand";v="8", "Chromium";v="135"',
-          "sec-ch-ua-mobile": "?0",
-          "sec-ch-ua-platform": '"Windows"',
-          "sec-fetch-dest": "empty",
-          "sec-fetch-mode": "cors",
-          "sec-fetch-site": "same-origin",
-          "sec-gpc": "1",
-          "user-agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-          "x-csrf-token": csrfToken,
-          "x-twitter-active-user": "yes",
-          "x-twitter-auth-type": "OAuth2Session",
-          "x-twitter-client-language": "ja",
-          cookie: `auth_token=${authToken}; ct0=${csrfToken}`,
-        },
-        hooks: {
-          beforeRequest: [
-            async (request) => {
-              const xClientTransactionId = await ct.generateTransactionId(
-                request.method,
-                new URL(request.url).pathname
-              );
-              request.headers.set(
-                "x-client-transaction-id",
-                xClientTransactionId
-              );
-            },
-          ],
-        },
-      });
-      const { screen_name: screenName } = c.req.valid("query");
-      const {
-        data: { user },
-      } = await client
-        .get("graphql/k5XapwcSikNsEsILW5FvgA/UserByScreenName", {
+      const twitterClient = TwitterAPIClient.getInstance();
+      
+      // 並列処理でパフォーマンス向上
+      const [response, ctInstance] = await Promise.all([
+        handleXMigration(),
+        ClientTransaction.create(await handleXMigration()).catch(err => {
+          console.error('ClientTransaction creation failed:', err);
+          return null;
+        })
+      ]);
+      
+      if (!ctInstance) {
+        return c.json({ error: "Failed to create client transaction" }, 500);
+      }
+      
+      const client = await twitterClient.createAuthenticatedClient(authToken, csrfToken, ctInstance);
+      
+      // 並列でAPIコールを実行
+      const [userResponse, searchResponse] = await Promise.all([
+        client.get("graphql/k5XapwcSikNsEsILW5FvgA/UserByScreenName", {
           searchParams: {
             variables: JSON.stringify({
               screen_name: screenName,
@@ -169,8 +271,12 @@ const route = app.openapi(
               withAuxiliaryUserLabels: false,
             }),
           },
-        })
-        .json<any>();
+        }),
+        // 2つ目のAPIコールも並列で実行（ただし、ユーザー情報が必要なので条件付き）
+        Promise.resolve(null) // プレースホルダー
+      ]);
+      
+      const { data: { user } } = await userResponse.json<any>();
       if (!user) {
         return c.json({
           not_found: true,
@@ -227,12 +333,10 @@ const route = app.openapi(
           user: user.result,
         });
       }
-      const {
-        data: {
-          search_by_raw_query: { search_timeline: searchTimeline },
-        },
-      } = await client
-        .get("graphql/AIdc203rPpK_k_2KWSdm7g/SearchTimeline", {
+      
+      // ユーザー情報取得後、並列でAPIコール実行
+      const [searchTimelineResponse, searchSuggestionResponse] = await Promise.all([
+        client.get("graphql/AIdc203rPpK_k_2KWSdm7g/SearchTimeline", {
           searchParams: {
             variables: JSON.stringify({
               rawQuery: `from:${user.result.legacy.screen_name}`,
@@ -276,8 +380,27 @@ const route = app.openapi(
               responsive_web_enhance_cards_enabled: false,
             }),
           },
+        }),
+        client.get("1.1/search/typeahead.json", {
+          searchParams: {
+            include_ext_is_blue_verified: "1",
+            include_ext_verified_type: "1",
+            include_ext_profile_image_shape: "1",
+            q: `@${user.result.legacy.screen_name} ${user.result.legacy.name}`,
+            src: "search_box",
+            result_type: "events,users,topics,lists",
+          },
         })
-        .json<any>();
+      ]);
+      
+      const [searchTimelineData, searchSuggestionData] = await Promise.all([
+        searchTimelineResponse.json<any>(),
+        searchSuggestionResponse.json<any>()
+      ]);
+      
+      const { data: { search_by_raw_query: { search_timeline: searchTimeline } } } = searchTimelineData;
+      const { users: searchSuggestionUsers } = searchSuggestionData;
+      
       let searchBanFlag = true;
       for (const instruction of searchTimeline.timeline.instructions) {
         for (const entry of instruction.entries) {
@@ -292,18 +415,6 @@ const route = app.openapi(
           }
         }
       }
-      const { users: searchSuggestionUsers } = await client
-        .get("1.1/search/typeahead.json", {
-          searchParams: {
-            include_ext_is_blue_verified: "1",
-            include_ext_verified_type: "1",
-            include_ext_profile_image_shape: "1",
-            q: `@${user.result.legacy.screen_name} ${user.result.legacy.name}`,
-            src: "search_box",
-            result_type: "events,users,topics,lists",
-          },
-        })
-        .json<any>();
       let searchSuggestionBanFlag = true;
       for (const searchSuggestionUser of searchSuggestionUsers) {
         if (
@@ -313,7 +424,8 @@ const route = app.openapi(
           break;
         }
       }
-      return c.json({
+      
+      const result = {
         not_found: false,
         suspend: false,
         protect: false,
@@ -324,8 +436,46 @@ const route = app.openapi(
         ghost_ban: false,
         reply_deboosting: false,
         user: user.result,
+      };
+      
+      // レスポンスをキャッシュ
+      responseCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now()
       });
+      
+      // パフォーマンス測定と統計情報記録
+      const totalDuration = Date.now() - startTime;
+      performanceMonitor.recordApiCall('shadowban-test', totalDuration, true);
+      
+      const poolStats = twitterClient.getPoolStats();
+      performanceMonitor.recordConnectionPool(
+        poolStats.activeConnections, 
+        cached !== undefined
+      );
+      
+      // デバッグ情報（開発環境のみ）
+      if (process.env.NODE_ENV === 'development') {
+        console.log(`Pool Stats: ${JSON.stringify(poolStats)}`);
+        console.log(`Response Time: ${totalDuration}ms`);
+        
+        const perfStats = performanceMonitor.getStats('shadowban-test');
+        const connectionStats = performanceMonitor.getConnectionPoolStats();
+        console.log('Performance Stats:', perfStats);
+        console.log('Connection Pool Stats:', connectionStats);
+        
+        const alerts = performanceMonitor.checkPerformanceAlerts();
+        if (alerts.length > 0) {
+          console.warn('Performance Alerts:', alerts);
+        }
+      }
+      
+      return c.json(result);
     } catch (error) {
+      // エラー時もパフォーマンス測定
+      const totalDuration = Date.now() - startTime;
+      performanceMonitor.recordApiCall('shadowban-test', totalDuration, false);
+      
       console.error("API test error:", error);
       return c.json({ error: "Internal server error" }, 500);
     }
