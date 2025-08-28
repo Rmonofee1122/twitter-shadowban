@@ -15,6 +15,11 @@ import { PerformanceMonitor } from "./performance-monitor";
 const responseCache = new Map();
 const CACHE_TTL = 60000; // 1分キャッシュ
 
+// Node ランタイムに固定
+export const runtime = "nodejs"; // ← 追加
+export const dynamic = "force-dynamic"; // 静的化を回避
+export const revalidate = 0;
+
 // 接続プールとHTTPクライアント最適化
 class TwitterAPIClient {
   private static instance: TwitterAPIClient;
@@ -145,8 +150,6 @@ function generateRandomHexString(length: number) {
   }
   return result;
 }
-
-export const runtime = "edge";
 
 const app = new OpenAPIHono().basePath("/api");
 
