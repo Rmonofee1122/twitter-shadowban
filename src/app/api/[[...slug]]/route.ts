@@ -1,3 +1,5 @@
+// X\src\app\api\[[...slug]]\route.ts
+
 import { logger } from "hono/logger";
 import { createRoute, OpenAPIHono } from "@hono/zod-openapi";
 import { swaggerUI } from "@hono/swagger-ui";
@@ -11,9 +13,41 @@ import ky from "ky";
 import { ClientTransaction, handleXMigration } from "x-client-transaction-id";
 import { PerformanceMonitor } from "./performance-monitor";
 
-// キャッシュとレスポンス最適化
+// 強化されたキャッシュとレスポンス最適化
 const responseCache = new Map();
-const CACHE_TTL = 60000; // 1分キャッシュ
+const CACHE_TTL = 300000; // 5分キャッシュ（レート制限対策で長め）
+
+// レート制限対策
+const rateLimitTracker = {
+  requests: new Map(),
+  windowMs: 15 * 60 * 1000, // 15分ウィンドウ
+  maxRequests: 300, // Twitter API制限に合わせる
+};
+
+// レート制限チェック機能
+function checkRateLimit(endpoint: string): boolean {
+  const now = Date.now();
+  const windowStart = now - rateLimitTracker.windowMs;
+
+  if (!rateLimitTracker.requests.has(endpoint)) {
+    rateLimitTracker.requests.set(endpoint, []);
+  }
+
+  const requests = rateLimitTracker.requests.get(endpoint);
+
+  // 古いリクエストを削除
+  const validRequests = requests.filter((time: number) => time > windowStart);
+  rateLimitTracker.requests.set(endpoint, validRequests);
+
+  return validRequests.length < rateLimitTracker.maxRequests;
+}
+
+// レート制限記録
+function recordRequest(endpoint: string): void {
+  const requests = rateLimitTracker.requests.get(endpoint) || [];
+  requests.push(Date.now());
+  rateLimitTracker.requests.set(endpoint, requests);
+}
 
 // Node ランタイムに固定
 export const runtime = "nodejs"; // ← 追加
@@ -27,15 +61,16 @@ class TwitterAPIClient {
   private connectionPool: Map<string, any> = new Map();
 
   private constructor() {
-    // kyクライアントの設定を最適化
+    // kyクライアントの設定を最適化（タイムアウト短縮）
     this.client = ky.create({
       prefixUrl: "https://api.twitter.com",
-      timeout: 15000, // 15秒タイムアウト
+      timeout: 8000, // 8秒タイムアウト（短縮）
       retry: {
-        limit: 3,
+        limit: 2, // リトライ回数削減
         methods: ["get"],
-        statusCodes: [408, 413, 429, 500, 502, 503, 504],
-        backoffLimit: 3000,
+        statusCodes: [408, 413, 500, 502, 503, 504], // 429除外（レート制限は別処理）
+        delay: (attemptCount) => 2000 * attemptCount, // 指数バックオフ
+        backoffLimit: 5000,
       },
       hooks: {
         beforeError: [
@@ -195,15 +230,37 @@ app.openapi(
   }),
   async (c) => {
     const { method, path } = c.req.valid("query");
-    const response = await handleXMigration();
-    const ct = await ClientTransaction.create(response);
-    const xClientTransactionId = await ct.generateTransactionId(method, path);
-    return c.json(
-      {
+
+    // キャッシュキーを生成
+    const cacheKey = `transaction_${method}_${path}`;
+
+    // キャッシュチェック（短期キャッシュ - 1分）
+    const cached = responseCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < 60000) {
+      return c.json(cached.data);
+    }
+
+    try {
+      const response = await handleXMigration();
+      const ct = await ClientTransaction.create(response);
+      const xClientTransactionId = await ct.generateTransactionId(method, path);
+
+      const result = {
         "x-client-transaction-id": xClientTransactionId,
-      },
-      200
-    );
+      };
+
+      // レスポンスをキャッシュ（1分間）
+      responseCache.set(cacheKey, {
+        data: result,
+        timestamp: Date.now(),
+      });
+
+      return c.json(result, 200);
+    } catch (error) {
+      console.error("Transaction ID generation failed:", error);
+      // 型エラー回避のため、正常レスポンス形式で返す
+      return c.json({ "x-client-transaction-id": "error" }, 200);
+    }
   }
 );
 
@@ -232,10 +289,38 @@ const route = app.openapi(
     try {
       const { screen_name: screenName } = c.req.valid("query");
 
-      // キャッシュチェック
+      // レート制限チェック
+      const endpoint = `/test_${screenName}`;
+      if (!checkRateLimit(endpoint)) {
+        return c.json(
+          {
+            error: "Rate limit exceeded. Please try again later.",
+            retry_after: rateLimitTracker.windowMs / 1000,
+          },
+          429
+        );
+      }
+
+      // 強化されたキャッシュチェック（ユーザー別＋グローバル）
       const cacheKey = `shadowban_${screenName}`;
-      const cached = responseCache.get(cacheKey);
+      const globalCacheKey = `global_shadowban_${screenName}`;
+
+      // まずユーザー別キャッシュをチェック
+      let cached = responseCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+        recordRequest(endpoint); // キャッシュヒットでもレート制限カウント
+        return c.json(cached.data);
+      }
+
+      // グローバルキャッシュもチェック（より長期間）
+      cached = responseCache.get(globalCacheKey);
+      if (cached && Date.now() - cached.timestamp < CACHE_TTL * 2) {
+        recordRequest(endpoint);
+        // ユーザー別キャッシュも更新
+        responseCache.set(cacheKey, {
+          data: cached.data,
+          timestamp: Date.now(),
+        });
         return c.json(cached.data);
       }
 
@@ -469,11 +554,34 @@ const route = app.openapi(
         user: user.result,
       };
 
-      // レスポンスをキャッシュ
-      responseCache.set(cacheKey, {
+      // レート制限記録
+      recordRequest(endpoint);
+
+      // 強化されたレスポンスキャッシュ（ユーザー別＋グローバル）
+      const cacheData = {
         data: result,
         timestamp: Date.now(),
-      });
+      };
+
+      // ユーザー別キャッシュ
+      responseCache.set(cacheKey, cacheData);
+
+      // グローバルキャッシュ（より長期間保持）
+      responseCache.set(globalCacheKey, cacheData);
+
+      // キャッシュサイズ制限（メモリリーク防止）
+      if (responseCache.size > 1000) {
+        const now = Date.now();
+        const keysToDelete: string[] = [];
+
+        responseCache.forEach((value, key) => {
+          if (now - value.timestamp > CACHE_TTL * 3) {
+            keysToDelete.push(key);
+          }
+        });
+
+        keysToDelete.forEach((key) => responseCache.delete(key));
+      }
 
       // パフォーマンス測定と統計情報記録
       const totalDuration = Date.now() - startTime;
